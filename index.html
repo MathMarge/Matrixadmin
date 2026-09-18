@@ -241,6 +241,14 @@
                     <input type="text" id="admin-qr-input" placeholder="Enter image URL or path">
                 </div>
                 <button onclick="saveAdminQrCode()">Save QR Code</button>
+                
+                <!-- QR Code Live Preview Container -->
+                <div id="qr-preview-container" class="hidden" style="margin-top: 14px; text-align: center;">
+                    <label style="font-size: 12px; color: var(--text-light); margin-bottom: 4px;">Current Active QR Preview:</label>
+                    <div>
+                        <img id="admin-qr-preview-img" src="" alt="Active QR Code" style="max-width: 150px; max-height: 150px; border: 1px solid var(--border); border-radius: 6px; padding: 4px; background: #fff;">
+                    </div>
+                </div>
             </div>
 
             <!-- Pending Deposits Management -->
@@ -276,6 +284,25 @@
                         </thead>
                         <tbody>
                             <!-- Dynamic Withdrawals -->
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+
+            <!-- Request History Section (Approved / Rejected) -->
+            <div class="card">
+                <h3>📜 Request History & Approval Logs</h3>
+                <div style="max-height: 250px; overflow-y: auto;">
+                    <table class="data-table" id="history-table">
+                        <thead>
+                            <tr>
+                                <th>User</th>
+                                <th>Details & Status</th>
+                                <th>Proof / Date</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            <!-- Dynamic History List -->
                         </tbody>
                     </table>
                 </div>
@@ -349,6 +376,7 @@
                 localStorage.setItem('matrix_admin_qr', qrUrl);
                 alert('UPI QR Code updated successfully!');
                 document.getElementById('admin-qr-input').value = '';
+                loadAdminData(); // Refresh to update live preview instantly
             } else {
                 alert('Please enter a valid image URL/path.');
             }
@@ -362,19 +390,26 @@
             document.getElementById('admin-total-users').innerText = users.length;
             document.getElementById('admin-active-users').innerText = users.filter(u => u.activePackage > 0).length;
 
-            const pendingDeps = transactions.filter(t => t.details.includes('Manual Deposit Request') && t.status.includes('Pending'));
+            const pendingDeps = transactions.filter(t => (t.details.includes('Manual Deposit Request') || t.details.includes('Deposit')) && t.status.includes('Pending'));
             const pendingWds = transactions.filter(t => t.details.includes('Withdrawal Request') && t.status === 'Pending');
 
             document.getElementById('admin-pending-deposits').innerText = pendingDeps.length;
             document.getElementById('admin-pending-withdrawals').innerText = pendingWds.length;
 
-            // Load saved QR code input placeholder or value if available
+            // QR Code Management & Live Preview Update
             const savedQr = localStorage.getItem('matrix_admin_qr');
+            const previewContainer = document.getElementById('qr-preview-container');
+            const previewImg = document.getElementById('admin-qr-preview-img');
+            
             if(savedQr) {
                 document.getElementById('admin-qr-input').placeholder = "Current QR set (Enter new to update)";
+                previewImg.src = savedQr;
+                previewContainer.classList.remove('hidden');
+            } else {
+                previewContainer.classList.add('hidden');
             }
 
-            // 2. Render Deposit Requests Table
+            // 2. Render Deposit Requests Table (Pending Only) with Screenshot fix
             const depTableBody = document.querySelector('#deposits-table tbody');
             depTableBody.innerHTML = '';
             if (pendingDeps.length === 0) {
@@ -385,7 +420,9 @@
                     let userName = userObj ? userObj.name : 'Unknown';
                     let tr = document.createElement('tr');
                     
-                    let screenshotBtn = tx.screenshot ? `<button class="action-btn" style="background:#2563eb; margin-top:4px;" onclick="viewScreenshot('${encodeURIComponent(tx.screenshot)}')">View Screenshot</button>` : `<br><small style="color:var(--text-light);">No screenshot</small>`;
+                    // Ensured screenshot check handles both properties if passed differently
+                    let proofImg = tx.screenshot || tx.image || '';
+                    let screenshotBtn = proofImg ? `<br><button class="action-btn" style="background:#2563eb; margin-top:4px;" onclick="viewScreenshot('${encodeURIComponent(proofImg)}')">📸 View Screenshot</button>` : `<br><small style="color:var(--text-light);">No screenshot attached</small>`;
 
                     tr.innerHTML = `
                         <td><strong>${userName}</strong><br><small>${tx.mobile}</small></td>
@@ -399,7 +436,7 @@
                 });
             }
 
-            // 3. Render Withdrawal Requests Table
+            // 3. Render Withdrawal Requests Table (Pending Only)
             const wdTableBody = document.querySelector('#withdrawals-table tbody');
             wdTableBody.innerHTML = '';
             if (pendingWds.length === 0) {
@@ -421,7 +458,37 @@
                 });
             }
 
-            // 4. Render All Users Table (Enhanced with Reg Date, Password, Delete & Coin Plus/Minus)
+            // 4. Render History Table (Approved / Rejected / Completed requests moved here with logs)
+            const historyTableBody = document.querySelector('#history-table tbody');
+            historyTableBody.innerHTML = '';
+            const historyTxs = transactions.filter(t => !t.status.includes('Pending'));
+            
+            if (historyTxs.length === 0) {
+                historyTableBody.innerHTML = `<tr><td colspan="3" style="text-align:center; color:var(--text-light);">No request history yet.</td></tr>`;
+            } else {
+                historyTxs.forEach((tx) => {
+                    let userObj = users.find(u => u.mobile === tx.mobile);
+                    let userName = userObj ? userObj.name : 'Unknown';
+                    let tr = document.createElement('tr');
+                    
+                    let statusBadgeClass = tx.status.includes('Successful') || tx.status.includes('Completed') ? 'badge-green' : 'badge-red';
+                    let proofImg = tx.screenshot || tx.image || '';
+                    let hScreenshotBtn = proofImg ? `<br><button class="action-btn" style="background:#2563eb; margin-top:4px;" onclick="viewScreenshot('${encodeURIComponent(proofImg)}')">📸 View Screenshot</button>` : '';
+
+                    tr.innerHTML = `
+                        <td><strong>${userName}</strong><br><small>${tx.mobile}</small></td>
+                        <td>
+                            ${tx.details}<br>
+                            <span class="badge ${statusBadgeClass}">${tx.status}</span>
+                            ${hScreenshotBtn}
+                        </td>
+                        <td><small style="color:var(--text-light);">${tx.date}</small></td>
+                    `;
+                    historyTableBody.appendChild(tr);
+                });
+            }
+
+            // 5. Render All Users Table
             const usersTableBody = document.querySelector('#users-table tbody');
             usersTableBody.innerHTML = '';
             if (users.length === 0) {
@@ -489,7 +556,7 @@
                 localStorage.setItem('mlm_transactions', JSON.stringify(transactions));
             }
 
-            alert(`Successfully added ${amount} coins to user ${mobile}!`);
+            alert(`Successfully added ${amount} coins to user ${mobile}! Request moved to history.`);
             loadAdminData();
         }
 
@@ -511,7 +578,7 @@
                 tx.status = 'Successful (Paid)';
                 localStorage.setItem('mlm_transactions', JSON.stringify(transactions));
             }
-            alert('Withdrawal marked as Successful/Paid.');
+            alert('Withdrawal marked as Successful/Paid and logged to history.');
             loadAdminData();
         }
 
@@ -552,7 +619,6 @@
                 return;
             }
 
-            let actionName = actionType === 'add' ? 'Add Coins to Wallet' : 'Deduct Coins from Wallet';
             let promptMsg = actionType === 'add' ? `Enter number of coins to ADD for ${user.name}:` : `Enter number of coins to DEDUCT from ${user.name}:`;
             
             let inputVal = prompt(promptMsg);
