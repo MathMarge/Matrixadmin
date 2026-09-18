@@ -298,7 +298,7 @@
                             <tr>
                                 <th>User</th>
                                 <th>Details & Status</th>
-                                <th>Proof / Date</th>
+                                <th>Proof / Date / Action</th>
                             </tr>
                         </thead>
                         <tbody>
@@ -420,7 +420,6 @@
                     let userName = userObj ? userObj.name : 'Unknown';
                     let tr = document.createElement('tr');
                     
-                    // Ensured screenshot check handles both properties if passed differently
                     let proofImg = tx.screenshot || tx.image || '';
                     let screenshotBtn = proofImg ? `<br><button class="action-btn" style="background:#2563eb; margin-top:4px;" onclick="viewScreenshot('${encodeURIComponent(proofImg)}')">📸 View Screenshot</button>` : `<br><small style="color:var(--text-light);">No screenshot attached</small>`;
 
@@ -442,7 +441,7 @@
             if (pendingWds.length === 0) {
                 wdTableBody.innerHTML = `<tr><td colspan="3" style="text-align:center; color:var(--text-light);">No pending withdrawals.</td></tr>`;
             } else {
-                pendingWds.forEach((tx) => {
+                pendingWds.forEach((tx, index) => {
                     let userObj = users.find(u => u.mobile === tx.mobile);
                     let userName = userObj ? userObj.name : 'Unknown';
                     let tr = document.createElement('tr');
@@ -458,7 +457,7 @@
                 });
             }
 
-            // 4. Render History Table (Approved / Rejected / Completed requests moved here with logs)
+            // 4. Render History Table (Approved / Rejected / Completed requests with Delete button)
             const historyTableBody = document.querySelector('#history-table tbody');
             historyTableBody.innerHTML = '';
             const historyTxs = transactions.filter(t => !t.status.includes('Pending'));
@@ -466,7 +465,7 @@
             if (historyTxs.length === 0) {
                 historyTableBody.innerHTML = `<tr><td colspan="3" style="text-align:center; color:var(--text-light);">No request history yet.</td></tr>`;
             } else {
-                historyTxs.forEach((tx) => {
+                historyTxs.forEach((tx, index) => {
                     let userObj = users.find(u => u.mobile === tx.mobile);
                     let userName = userObj ? userObj.name : 'Unknown';
                     let tr = document.createElement('tr');
@@ -482,19 +481,25 @@
                             <span class="badge ${statusBadgeClass}">${tx.status}</span>
                             ${hScreenshotBtn}
                         </td>
-                        <td><small style="color:var(--text-light);">${tx.date}</small></td>
+                        <td>
+                            <small style="color:var(--text-light);">${tx.date}</small><br>
+                            <button class="action-btn btn-danger" style="margin-top:6px;" onclick="deleteHistoryLog('${tx.mobile}', '${tx.details}', '${tx.date}')">🗑️ Delete</button>
+                        </td>
                     `;
                     historyTableBody.appendChild(tr);
                 });
             }
 
-            // 5. Render All Users Table
+            // 5. Render All Users Table (Reverse Sorted so newest user appears at the top)
             const usersTableBody = document.querySelector('#users-table tbody');
             usersTableBody.innerHTML = '';
             if (users.length === 0) {
                 usersTableBody.innerHTML = `<tr><td colspan="3" style="text-align:center; color:var(--text-light);">No users registered yet.</td></tr>`;
             } else {
-                users.forEach(user => {
+                // Sorting users in reverse order (.slice().reverse() or timestamp sort)
+                let sortedUsers = [...users].reverse();
+                
+                sortedUsers.forEach(user => {
                     let regDateStr = user.regDate ? user.regDate : (user.date ? user.date : 'N/A');
                     let tr = document.createElement('tr');
                     tr.innerHTML = `
@@ -608,7 +613,26 @@
 
         // --- NEW FEATURES IMPLEMENTED ---
 
-        // 1. Add (+) or Subtract (-) Coins Feature with Transaction Log
+        // 1. Delete History Log Item Feature
+        function deleteHistoryLog(mobile, details, date) {
+            let transactions = JSON.parse(localStorage.getItem('mlm_transactions')) || [];
+            let txIndex = transactions.findIndex(t => t.mobile === mobile && t.details === details && t.date === date);
+
+            if (txIndex === -1) {
+                alert('History log item not found.');
+                return;
+            }
+
+            let confirmDel = confirm(`Are you sure you want to delete this history log record?`);
+            if (confirmDel) {
+                transactions.splice(txIndex, 1);
+                localStorage.setItem('mlm_transactions', JSON.stringify(transactions));
+                alert('History log deleted successfully.');
+                loadAdminData();
+            }
+        }
+
+        // 2. Add (+) or Subtract (-) Coins Feature with Transaction Log
         function adminAdjustCoins(mobile, actionType) {
             let users = JSON.parse(localStorage.getItem('mlm_users')) || [];
             let transactions = JSON.parse(localStorage.getItem('mlm_transactions')) || [];
@@ -659,7 +683,7 @@
             loadAdminData();
         }
 
-        // 2. Delete User Account Feature
+        // 3. Delete User Account Feature
         function deleteUserAccount(mobile) {
             let users = JSON.parse(localStorage.getItem('mlm_users')) || [];
             let userIndex = users.findIndex(u => u.mobile === mobile);
