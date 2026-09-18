@@ -151,9 +151,11 @@
             font-size: 11px;
             width: auto;
             margin-right: 4px;
+            margin-bottom: 4px;
         }
         .btn-success { background-color: var(--success); }
         .btn-danger { background-color: var(--danger); }
+        .btn-warning { background-color: var(--warning); color: #fff; }
 
         /* Modal for Screenshot Preview */
         .modal {
@@ -282,13 +284,13 @@
             <!-- User Database Management -->
             <div class="card">
                 <h3>👥 Registered Users Management</h3>
-                <div style="max-height: 300px; overflow-y: auto;">
+                <div style="max-height: 350px; overflow-y: auto;">
                     <table class="data-table" id="users-table">
                         <thead>
                             <tr>
-                                <th>Name / Mobile</th>
-                                <th>Wallet & Pkg</th>
-                                <th>Status / Action</th>
+                                <th>User Info</th>
+                                <th>Wallet, Pkg & Pass</th>
+                                <th>Actions & Management</th>
                             </tr>
                         </thead>
                         <tbody>
@@ -419,20 +421,32 @@
                 });
             }
 
-            // 4. Render All Users Table
+            // 4. Render All Users Table (Enhanced with Reg Date, Password, Delete & Coin Plus/Minus)
             const usersTableBody = document.querySelector('#users-table tbody');
             usersTableBody.innerHTML = '';
             if (users.length === 0) {
                 usersTableBody.innerHTML = `<tr><td colspan="3" style="text-align:center; color:var(--text-light);">No users registered yet.</td></tr>`;
             } else {
                 users.forEach(user => {
+                    let regDateStr = user.regDate ? user.regDate : (user.date ? user.date : 'N/A');
                     let tr = document.createElement('tr');
                     tr.innerHTML = `
-                        <td><strong>${user.name}</strong><br><small>${user.mobile}</small></td>
-                        <td>Wallet: ${user.wallet} Coins<br>Pkg: ${user.activePackage === 0 ? 'Inactive' : user.activePackage}</td>
                         <td>
-                            <span class="badge ${user.activePackage > 0 ? 'badge-green' : 'badge-red'}">${user.activePackage > 0 ? 'Active' : 'Inactive'}</span>
-                            <br><button class="action-btn btn-danger" style="margin-top:4px;" onclick="resetUserPassword('${user.mobile}')">Reset Pass</button>
+                            <strong>${user.name}</strong><br>
+                            <small>Mobile: ${user.mobile}</small><br>
+                            <small style="color:var(--text-light);">Reg: ${regDateStr}</small>
+                        </td>
+                        <td>
+                            Wallet: <strong>${user.wallet}</strong> Coins<br>
+                            Pkg: ${user.activePackage === 0 ? 'Inactive' : user.activePackage}<br>
+                            Pass: <code style="background:#f1f5f9; padding:1px 4px; border-radius:4px;">${user.password || 'N/A'}</code>
+                        </td>
+                        <td>
+                            <span class="badge ${user.activePackage > 0 ? 'badge-green' : 'badge-red'}">${user.activePackage > 0 ? 'Active' : 'Inactive'}</span><br>
+                            <button class="action-btn btn-success" style="margin-top:4px;" onclick="adminAdjustCoins('${user.mobile}', 'add')">+ Add</button>
+                            <button class="action-btn btn-warning" onclick="adminAdjustCoins('${user.mobile}', 'sub')">- Sub</button><br>
+                            <button class="action-btn" style="background:#2563eb;" onclick="resetUserPassword('${user.mobile}')">Reset Pass</button>
+                            <button class="action-btn btn-danger" onclick="deleteUserAccount('${user.mobile}')">Delete</button>
                         </td>
                     `;
                     usersTableBody.appendChild(tr);
@@ -456,7 +470,6 @@
             let users = JSON.parse(localStorage.getItem('mlm_users')) || [];
             let transactions = JSON.parse(localStorage.getItem('mlm_transactions')) || [];
 
-            // Extract coin amount from details string (e.g., "Manual Deposit Request: 500 Coins")
             let match = details.match(/(\d+)\sCoins/);
             if (!match) {
                 alert('Error parsing deposit amount.');
@@ -464,14 +477,12 @@
             }
             let amount = parseFloat(match[1]);
 
-            // Update User Wallet
             let user = users.find(u => u.mobile === mobile);
             if (user) {
                 user.wallet += amount;
                 localStorage.setItem('mlm_users', JSON.stringify(users));
             }
 
-            // Update Transaction Status
             let tx = transactions.find(t => t.mobile === mobile && t.details === details && t.status.includes('Pending'));
             if (tx) {
                 tx.status = 'Successful (Approved)';
@@ -508,13 +519,12 @@
             let users = JSON.parse(localStorage.getItem('mlm_users')) || [];
             let transactions = JSON.parse(localStorage.getItem('mlm_transactions')) || [];
 
-            // Extract coin amount to refund back to user wallet
             let match = details.match(/Withdrawal Request:\s([\d.]+)\sCoins/);
             if (match) {
                 let amount = parseFloat(match[1]);
                 let user = users.find(u => u.mobile === mobile);
                 if (user) {
-                    user.wallet += amount; // Refund coins back
+                    user.wallet += amount; 
                     localStorage.setItem('mlm_users', JSON.stringify(users));
                 }
             }
@@ -529,6 +539,81 @@
             loadAdminData();
         }
 
+        // --- NEW FEATURES IMPLEMENTED ---
+
+        // 1. Add (+) or Subtract (-) Coins Feature with Transaction Log
+        function adminAdjustCoins(mobile, actionType) {
+            let users = JSON.parse(localStorage.getItem('mlm_users')) || [];
+            let transactions = JSON.parse(localStorage.getItem('mlm_transactions')) || [];
+            let user = users.find(u => u.mobile === mobile);
+
+            if (!user) {
+                alert('User not found!');
+                return;
+            }
+
+            let actionName = actionType === 'add' ? 'Add Coins to Wallet' : 'Deduct Coins from Wallet';
+            let promptMsg = actionType === 'add' ? `Enter number of coins to ADD for ${user.name}:` : `Enter number of coins to DEDUCT from ${user.name}:`;
+            
+            let inputVal = prompt(promptMsg);
+            if (inputVal === null || inputVal.trim() === '') return;
+
+            let amount = parseFloat(inputVal);
+            if (isNaN(amount) || amount <= 0) {
+                alert('Please enter a valid positive number.');
+                return;
+            }
+
+            if (actionType === 'sub' && user.wallet < amount) {
+                alert(`Error: User only has ${user.wallet} coins in wallet. Cannot deduct ${amount} coins.`);
+                return;
+            }
+
+            // Update user wallet balance instantly
+            if (actionType === 'add') {
+                user.wallet += amount;
+            } else {
+                user.wallet -= amount;
+            }
+            localStorage.setItem('mlm_users', JSON.stringify(users));
+
+            // Create and save transaction log
+            let nowStr = new Date().toLocaleString();
+            let logDetails = actionType === 'add' ? `Admin Added: +${amount} Coins` : `Admin Deducted: -${amount} Coins`;
+            
+            transactions.unshift({
+                mobile: mobile,
+                details: logDetails,
+                status: 'Completed (Admin Action)',
+                date: nowStr
+            });
+            localStorage.setItem('mlm_transactions', JSON.stringify(transactions));
+
+            alert(`Successfully ${actionType === 'add' ? 'added' : 'deducted'} ${amount} coins! User wallet updated.`);
+            loadAdminData();
+        }
+
+        // 2. Delete User Account Feature
+        function deleteUserAccount(mobile) {
+            let users = JSON.parse(localStorage.getItem('mlm_users')) || [];
+            let userIndex = users.findIndex(u => u.mobile === mobile);
+
+            if (userIndex === -1) {
+                alert('User not found.');
+                return;
+            }
+
+            let userName = users[userIndex].name;
+            let confirmDel = confirm(`Are you sure you want to permanently delete user account: ${userName} (${mobile})?`);
+            
+            if (confirmDel) {
+                users.splice(userIndex, 1);
+                localStorage.setItem('mlm_users', JSON.stringify(users));
+                alert('User account deleted successfully.');
+                loadAdminData();
+            }
+        }
+
         function resetUserPassword(mobile) {
             let users = JSON.parse(localStorage.getItem('mlm_users')) || [];
             let newPass = prompt("Enter new password for user " + mobile + ":");
@@ -538,6 +623,7 @@
                     user.password = newPass.trim();
                     localStorage.setItem('mlm_users', JSON.stringify(users));
                     alert('Password updated successfully!');
+                    loadAdminData();
                 }
             }
         }
