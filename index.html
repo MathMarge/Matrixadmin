@@ -157,7 +157,7 @@
         .btn-danger { background-color: var(--danger); }
         .btn-warning { background-color: var(--warning); color: #fff; }
 
-        /* Modal for Screenshot Preview */
+        /* Modal for Screenshot & Tree Preview */
         .modal {
             position: fixed;
             top: 0;
@@ -177,12 +177,22 @@
             max-width: 90%;
             max-height: 90%;
             text-align: center;
+            overflow-y: auto;
         }
         .modal-content img {
             max-width: 100%;
             max-height: 70vh;
             border-radius: 4px;
             margin-bottom: 12px;
+        }
+        .tree-level-box {
+            background: #f9fafb;
+            border: 1px solid var(--border);
+            border-radius: 6px;
+            padding: 8px;
+            margin-bottom: 8px;
+            text-align: left;
+            font-size: 12px;
         }
     </style>
 </head>
@@ -240,7 +250,11 @@
                     <label>Update UPI QR Code Image Link / URL</label>
                     <input type="text" id="admin-qr-input" placeholder="Enter image URL or path">
                 </div>
-                <button onclick="saveAdminQrCode()">Save QR Code</button>
+                <div class="form-group">
+                    <label>Update UPI ID</label>
+                    <input type="text" id="admin-upi-input" placeholder="e.g. admin@upi">
+                </div>
+                <button onclick="saveAdminQrCode()">Save QR & UPI</button>
                 
                 <!-- QR Code Live Preview Container -->
                 <div id="qr-preview-container" class="hidden" style="margin-top: 14px; text-align: center;">
@@ -311,6 +325,9 @@
             <!-- User Database Management -->
             <div class="card">
                 <h3>👥 Registered Users Management</h3>
+                <div class="form-group" style="margin-bottom: 10px;">
+                    <input type="text" id="user-search-input" placeholder="Search by name, mobile, refer code, or date..." oninput="loadAdminData()">
+                </div>
                 <div style="max-height: 350px; overflow-y: auto;">
                     <table class="data-table" id="users-table">
                         <thead>
@@ -329,16 +346,88 @@
         </div>
     </div>
 
-    <!-- Screenshot Modal Container -->
+    <!-- Screenshot / Tree Modal Container -->
     <div id="screenshot-modal" class="modal hidden">
         <div class="modal-content">
-            <h4>Payment Screenshot</h4>
-            <div style="margin: 10px 0;"><img id="modal-img" src="" alt="Payment Proof"></div>
+            <h4 id="modal-title">Payment Screenshot</h4>
+            <div style="margin: 10px 0;" id="modal-body-content">
+                <img id="modal-img" src="" alt="Payment Proof">
+            </div>
             <button onclick="closeModal()">Close Preview</button>
         </div>
     </div>
 
+    <!-- Firebase SDK Setup & Real-time Sync -->
+    <script type="module">
+        import { initializeApp } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-app.js";
+        import { getDatabase, ref, set, get, child, onValue } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-database.js";
+
+        const firebaseConfig = {
+          apiKey: "AIzaSyA5LxqMPqhnCQ4pD71AfNzulLSVacf1G7g",
+          authDomain: "mathmarge.firebaseapp.com",
+          projectId: "mathmarge",
+          storageBucket: "mathmarge.firebasestorage.app",
+          messagingSenderId: "313180377672",
+          appId: "1:313180377672:web:930c0b0ec175033153fe7d",
+          measurementId: "G-VN9F03PJ1T"
+        };
+
+        const app = initializeApp(firebaseConfig);
+        const db = getDatabase(app);
+
+        window.matrixAdminDB = { db, ref, set, get, child, onValue };
+        window.initAdminFirebaseSync();
+    </script>
+
     <script>
+        let users = JSON.parse(localStorage.getItem('mlm_users')) || [];
+        let transactions = JSON.parse(localStorage.getItem('mlm_transactions')) || [];
+
+        // Realtime sync from Firebase for Admin Panel
+        window.initAdminFirebaseSync = function() {
+            const { db, ref, onValue } = window.matrixAdminDB;
+
+            onValue(ref(db, 'matrix_users'), (snapshot) => {
+                if (snapshot.exists()) {
+                    users = snapshot.val() || [];
+                    localStorage.setItem('mlm_users', JSON.stringify(users));
+                    if (localStorage.getItem('matrix_admin_logged') === 'true') {
+                        loadAdminData();
+                    }
+                }
+            });
+
+            onValue(ref(db, 'matrix_transactions'), (snapshot) => {
+                if (snapshot.exists()) {
+                    transactions = snapshot.val() || [];
+                    localStorage.setItem('mlm_transactions', JSON.stringify(transactions));
+                    if (localStorage.getItem('matrix_admin_logged') === 'true') {
+                        loadAdminData();
+                    }
+                }
+            });
+
+            onValue(ref(db, 'matrix_admin_qr'), (snapshot) => {
+                if (snapshot.exists()) {
+                    localStorage.setItem('matrix_admin_qr', snapshot.val());
+                }
+            });
+
+            onValue(ref(db, 'matrix_admin_upi'), (snapshot) => {
+                if (snapshot.exists()) {
+                    localStorage.setItem('matrix_admin_upi', snapshot.val());
+                }
+            });
+        };
+
+        function syncAdminToFirebase() {
+            if (window.matrixAdminDB) {
+                const { db, ref, set } = window.matrixAdminDB;
+                set(ref(db, 'matrix_users'), users);
+                set(ref(db, 'matrix_transactions'), transactions);
+            }
+        }
+
         // Check Admin Session on Load
         window.onload = function() {
             if (localStorage.getItem('matrix_admin_logged') === 'true') {
@@ -351,7 +440,6 @@
         function handleAdminLogin() {
             const username = document.getElementById('admin-username').value.trim();
             const pin = document.getElementById('admin-pin').value.trim();
-            // Default Admin Credentials: Username admin, PIN 7860
             if (username === "admin" && pin === "7860") {
                 localStorage.setItem('matrix_admin_logged', 'true');
                 document.getElementById('admin-auth-card').classList.add('hidden');
@@ -372,21 +460,38 @@
 
         function saveAdminQrCode() {
             const qrUrl = document.getElementById('admin-qr-input').value.trim();
+            const upiId = document.getElementById('admin-upi-input').value.trim();
+            
             if (qrUrl) {
                 localStorage.setItem('matrix_admin_qr', qrUrl);
-                alert('UPI QR Code updated successfully!');
+                if (window.matrixAdminDB) {
+                    const { db, ref, set } = window.matrixAdminDB;
+                    set(ref(db, 'matrix_admin_qr'), qrUrl);
+                }
+            }
+
+            if (upiId) {
+                localStorage.setItem('matrix_admin_upi', upiId);
+                if (window.matrixAdminDB) {
+                    const { db, ref, set } = window.matrixAdminDB;
+                    set(ref(db, 'matrix_admin_upi'), upiId);
+                }
+            }
+
+            if (qrUrl || upiId) {
+                alert('QR Code and UPI ID updated successfully!');
                 document.getElementById('admin-qr-input').value = '';
-                loadAdminData(); // Refresh to update live preview instantly
+                document.getElementById('admin-upi-input').value = '';
+                loadAdminData();
             } else {
-                alert('Please enter a valid image URL/path.');
+                alert('Please enter valid details to save.');
             }
         }
 
         function loadAdminData() {
-            let users = JSON.parse(localStorage.getItem('mlm_users')) || [];
-            let transactions = JSON.parse(localStorage.getItem('mlm_transactions')) || [];
+            users = JSON.parse(localStorage.getItem('mlm_users')) || [];
+            transactions = JSON.parse(localStorage.getItem('mlm_transactions')) || [];
 
-            // 1. Metrics Calculation
             document.getElementById('admin-total-users').innerText = users.length;
             document.getElementById('admin-active-users').innerText = users.filter(u => u.activePackage > 0).length;
 
@@ -396,7 +501,6 @@
             document.getElementById('admin-pending-deposits').innerText = pendingDeps.length;
             document.getElementById('admin-pending-withdrawals').innerText = pendingWds.length;
 
-            // QR Code Management & Live Preview Update
             const savedQr = localStorage.getItem('matrix_admin_qr');
             const previewContainer = document.getElementById('qr-preview-container');
             const previewImg = document.getElementById('admin-qr-preview-img');
@@ -409,7 +513,7 @@
                 previewContainer.classList.add('hidden');
             }
 
-            // 2. Render Deposit Requests Table (Pending Only) with Screenshot fix
+            // Render Deposit Requests Table
             const depTableBody = document.querySelector('#deposits-table tbody');
             depTableBody.innerHTML = '';
             if (pendingDeps.length === 0) {
@@ -435,13 +539,13 @@
                 });
             }
 
-            // 3. Render Withdrawal Requests Table (Pending Only)
+            // Render Withdrawal Requests Table
             const wdTableBody = document.querySelector('#withdrawals-table tbody');
             wdTableBody.innerHTML = '';
             if (pendingWds.length === 0) {
                 wdTableBody.innerHTML = `<tr><td colspan="3" style="text-align:center; color:var(--text-light);">No pending withdrawals.</td></tr>`;
             } else {
-                pendingWds.forEach((tx, index) => {
+                pendingWds.forEach((tx) => {
                     let userObj = users.find(u => u.mobile === tx.mobile);
                     let userName = userObj ? userObj.name : 'Unknown';
                     let tr = document.createElement('tr');
@@ -457,7 +561,7 @@
                 });
             }
 
-            // 4. Render History Table (Approved / Rejected / Completed requests with Delete button)
+            // Render History Table
             const historyTableBody = document.querySelector('#history-table tbody');
             historyTableBody.innerHTML = '';
             const historyTxs = transactions.filter(t => !t.status.includes('Pending'));
@@ -465,7 +569,7 @@
             if (historyTxs.length === 0) {
                 historyTableBody.innerHTML = `<tr><td colspan="3" style="text-align:center; color:var(--text-light);">No request history yet.</td></tr>`;
             } else {
-                historyTxs.forEach((tx, index) => {
+                historyTxs.forEach((tx) => {
                     let userObj = users.find(u => u.mobile === tx.mobile);
                     let userName = userObj ? userObj.name : 'Unknown';
                     let tr = document.createElement('tr');
@@ -490,15 +594,27 @@
                 });
             }
 
-            // 5. Render All Users Table (Reverse Sorted so newest user appears at the top)
+            // Render All Users Table (with search filter & 4-Level Downline Tree View Button)
             const usersTableBody = document.querySelector('#users-table tbody');
             usersTableBody.innerHTML = '';
-            if (users.length === 0) {
-                usersTableBody.innerHTML = `<tr><td colspan="3" style="text-align:center; color:var(--text-light);">No users registered yet.</td></tr>`;
-            } else {
-                // Sorting users in reverse order (.slice().reverse() or timestamp sort)
-                let sortedUsers = [...users].reverse();
+            
+            let searchQuery = document.getElementById('user-search-input') ? document.getElementById('user-search-input').value.toLowerCase().trim() : '';
+            
+            let filteredUsers = users.filter(user => {
+                if (!searchQuery) return true;
+                let nameMatch = user.name && user.name.toLowerCase().includes(searchQuery);
+                let mobileMatch = user.mobile && user.mobile.toLowerCase().includes(searchQuery);
+                let referCodeMatch = user.referCode && user.referCode.toLowerCase().includes(searchQuery);
+                let regDateStr = (user.regDate ? user.regDate : (user.date ? user.date : '')).toLowerCase();
+                let dateMatch = regDateStr.includes(searchQuery);
                 
+                return nameMatch || mobileMatch || referCodeMatch || dateMatch;
+            });
+
+            if (filteredUsers.length === 0) {
+                usersTableBody.innerHTML = `<tr><td colspan="3" style="text-align:center; color:var(--text-light);">No users found.</td></tr>`;
+            } else {
+                let sortedUsers = [...filteredUsers].reverse();
                 sortedUsers.forEach(user => {
                     let regDateStr = user.regDate ? user.regDate : (user.date ? user.date : 'N/A');
                     let tr = document.createElement('tr');
@@ -506,7 +622,9 @@
                         <td>
                             <strong>${user.name}</strong><br>
                             <small>Mobile: ${user.mobile}</small><br>
-                            <small style="color:var(--text-light);">Reg: ${regDateStr}</small>
+                            <small>Refer Code: ${user.referCode || 'N/A'}</small><br>
+                            <small style="color:var(--text-light);">Reg: ${regDateStr}</small><br>
+                            <small>Sponsor: ${user.sponsorMobile || user.referredBy || 'None (Root)'}</small>
                         </td>
                         <td>
                             Wallet: <strong>${user.wallet}</strong> Coins<br>
@@ -515,7 +633,8 @@
                         </td>
                         <td>
                             <span class="badge ${user.activePackage > 0 ? 'badge-green' : 'badge-red'}">${user.activePackage > 0 ? 'Active' : 'Inactive'}</span><br>
-                            <button class="action-btn btn-success" style="margin-top:4px;" onclick="adminAdjustCoins('${user.mobile}', 'add')">+ Add</button>
+                            <button class="action-btn" style="background:#8b5cf6; margin-top:4px;" onclick="viewUserTree('${user.mobile}')">🌳 View Tree (4L)</button><br>
+                            <button class="action-btn btn-success" onclick="adminAdjustCoins('${user.mobile}', 'add')">+ Add</button>
                             <button class="action-btn btn-warning" onclick="adminAdjustCoins('${user.mobile}', 'sub')">- Sub</button><br>
                             <button class="action-btn" style="background:#2563eb;" onclick="resetUserPassword('${user.mobile}')">Reset Pass</button>
                             <button class="action-btn btn-danger" onclick="deleteUserAccount('${user.mobile}')">Delete</button>
@@ -528,20 +647,60 @@
 
         function viewScreenshot(encodedImg) {
             let imgUrl = decodeURIComponent(encodedImg);
-            document.getElementById('modal-img').src = imgUrl;
+            document.getElementById('modal-title').innerText = "Payment Screenshot";
+            document.getElementById('modal-body-content').innerHTML = `<img id="modal-img" src="${imgUrl}" alt="Payment Proof">`;
+            document.getElementById('screenshot-modal').classList.remove('hidden');
+        }
+
+        // 4-Level Downline Tree View Function for Admin
+        function viewUserTree(mobile) {
+            let targetUser = users.find(u => u.mobile === mobile);
+            if (!targetUser) return;
+
+            // Match by referral code or mobile number to ensure proper downline linkage
+            let targetCodes = [targetUser.mobile, targetUser.referCode].filter(Boolean);
+
+            let l1 = users.filter(u => targetCodes.includes(u.referredBy));
+            let l1Codes = l1.map(u => u.referCode).filter(Boolean);
+
+            let l2 = users.filter(u => l1Codes.includes(u.referredBy));
+            let l2Codes = l2.map(u => u.referCode).filter(Boolean);
+
+            let l3 = users.filter(u => l2Codes.includes(u.referredBy));
+            let l3Codes = l3.map(u => u.referCode).filter(Boolean);
+
+            let l4 = users.filter(u => l3Codes.includes(u.referredBy));
+
+            let renderLevelHtml = (title, levelUsers) => {
+                if (levelUsers.length === 0) {
+                    return `<div class="tree-level-box"><strong>${title}:</strong> <span style="color:var(--text-light);">None</span></div>`;
+                }
+                let listHtml = levelUsers.map(u => `<div style="margin-left: 10px; margin-top: 4px; border-left: 2px solid var(--primary); padding-left: 6px;">🔹 <strong>${u.name}</strong> (${u.mobile}) - <span class="badge ${u.activePackage > 0 ? 'badge-green' : 'badge-red'}">${u.activePackage > 0 ? 'Active' : 'Inactive'}</span></div>`).join('');
+                return `<div class="tree-level-box"><strong>${title} (${levelUsers.length}):</strong><div style="margin-top:4px;">${listHtml}</div></div>`;
+            };
+
+            let treeHtml = `
+                <div style="text-align:left; margin-bottom: 12px; padding: 10px; background: #eef2ff; border-radius: 6px;">
+                    <strong>Selected User:</strong> ${targetUser.name} (${targetUser.mobile})<br>
+                    <strong>Total Team Downline:</strong> ${l1.length + l2.length + l3.length + l4.length} members
+                </div>
+                ${renderLevelHtml('Level 1 (Direct Referrals)', l1)}
+                ${renderLevelHtml('Level 2', l2)}
+                ${renderLevelHtml('Level 3', l3)}
+                ${renderLevelHtml('Level 4', l4)}
+            `;
+
+            document.getElementById('modal-title').innerText = `4-Level Downline Tree (${targetUser.name})`;
+            document.getElementById('modal-body-content').innerHTML = treeHtml;
             document.getElementById('screenshot-modal').classList.remove('hidden');
         }
 
         function closeModal() {
             document.getElementById('screenshot-modal').classList.add('hidden');
-            document.getElementById('modal-img').src = '';
+            document.getElementById('modal-body-content').innerHTML = `<img id="modal-img" src="" alt="Payment Proof">`;
         }
 
-        // --- ADMIN ACTIONS LOGIC ---
         function approveDeposit(mobile, details) {
-            let users = JSON.parse(localStorage.getItem('mlm_users')) || [];
-            let transactions = JSON.parse(localStorage.getItem('mlm_transactions')) || [];
-
             let match = details.match(/(\d+)\sCoins/);
             if (!match) {
                 alert('Error parsing deposit amount.');
@@ -552,122 +711,91 @@
             let user = users.find(u => u.mobile === mobile);
             if (user) {
                 user.wallet += amount;
-                localStorage.setItem('mlm_users', JSON.stringify(users));
             }
 
             let tx = transactions.find(t => t.mobile === mobile && t.details === details && t.status.includes('Pending'));
             if (tx) {
                 tx.status = 'Successful (Approved)';
-                localStorage.setItem('mlm_transactions', JSON.stringify(transactions));
             }
 
-            alert(`Successfully added ${amount} coins to user ${mobile}! Request moved to history.`);
+            syncAdminToFirebase();
+            alert(`Successfully added ${amount} coins to user ${mobile}!`);
             loadAdminData();
         }
 
         function rejectTransaction(mobile, details) {
-            let transactions = JSON.parse(localStorage.getItem('mlm_transactions')) || [];
             let tx = transactions.find(t => t.mobile === mobile && t.details === details);
             if (tx) {
                 tx.status = 'Rejected';
-                localStorage.setItem('mlm_transactions', JSON.stringify(transactions));
             }
+            syncAdminToFirebase();
             alert('Deposit request rejected.');
             loadAdminData();
         }
 
         function approveWithdrawal(mobile, details) {
-            let transactions = JSON.parse(localStorage.getItem('mlm_transactions')) || [];
             let tx = transactions.find(t => t.mobile === mobile && t.details === details && t.status === 'Pending');
             if (tx) {
                 tx.status = 'Successful (Paid)';
-                localStorage.setItem('mlm_transactions', JSON.stringify(transactions));
             }
-            alert('Withdrawal marked as Successful/Paid and logged to history.');
+            syncAdminToFirebase();
+            alert('Withdrawal marked as Successful/Paid.');
             loadAdminData();
         }
 
         function rejectWithdrawal(mobile, details) {
-            let users = JSON.parse(localStorage.getItem('mlm_users')) || [];
-            let transactions = JSON.parse(localStorage.getItem('mlm_transactions')) || [];
-
             let match = details.match(/Withdrawal Request:\s([\d.]+)\sCoins/);
             if (match) {
                 let amount = parseFloat(match[1]);
                 let user = users.find(u => u.mobile === mobile);
                 if (user) {
                     user.wallet += amount; 
-                    localStorage.setItem('mlm_users', JSON.stringify(users));
                 }
             }
 
             let tx = transactions.find(t => t.mobile === mobile && t.details === details);
             if (tx) {
                 tx.status = 'Rejected & Refunded';
-                localStorage.setItem('mlm_transactions', JSON.stringify(transactions));
             }
 
-            alert('Withdrawal rejected and coins refunded to user.');
+            syncAdminToFirebase();
+            alert('Withdrawal rejected and coins refunded.');
             loadAdminData();
         }
 
-        // --- NEW FEATURES IMPLEMENTED ---
-
-        // 1. Delete History Log Item Feature
         function deleteHistoryLog(mobile, details, date) {
-            let transactions = JSON.parse(localStorage.getItem('mlm_transactions')) || [];
             let txIndex = transactions.findIndex(t => t.mobile === mobile && t.details === details && t.date === date);
+            if (txIndex === -1) return;
 
-            if (txIndex === -1) {
-                alert('History log item not found.');
-                return;
-            }
-
-            let confirmDel = confirm(`Are you sure you want to delete this history log record?`);
-            if (confirmDel) {
+            if (confirm(`Are you sure you want to delete this history log record?`)) {
                 transactions.splice(txIndex, 1);
-                localStorage.setItem('mlm_transactions', JSON.stringify(transactions));
-                alert('History log deleted successfully.');
+                syncAdminToFirebase();
                 loadAdminData();
             }
         }
 
-        // 2. Add (+) or Subtract (-) Coins Feature with Transaction Log
         function adminAdjustCoins(mobile, actionType) {
-            let users = JSON.parse(localStorage.getItem('mlm_users')) || [];
-            let transactions = JSON.parse(localStorage.getItem('mlm_transactions')) || [];
             let user = users.find(u => u.mobile === mobile);
-
-            if (!user) {
-                alert('User not found!');
-                return;
-            }
+            if (!user) return;
 
             let promptMsg = actionType === 'add' ? `Enter number of coins to ADD for ${user.name}:` : `Enter number of coins to DEDUCT from ${user.name}:`;
-            
             let inputVal = prompt(promptMsg);
             if (inputVal === null || inputVal.trim() === '') return;
 
             let amount = parseFloat(inputVal);
-            if (isNaN(amount) || amount <= 0) {
-                alert('Please enter a valid positive number.');
-                return;
-            }
+            if (isNaN(amount) || amount <= 0) return;
 
             if (actionType === 'sub' && user.wallet < amount) {
-                alert(`Error: User only has ${user.wallet} coins in wallet. Cannot deduct ${amount} coins.`);
+                alert(`Error: User only has ${user.wallet} coins.`);
                 return;
             }
 
-            // Update user wallet balance instantly
             if (actionType === 'add') {
                 user.wallet += amount;
             } else {
                 user.wallet -= amount;
             }
-            localStorage.setItem('mlm_users', JSON.stringify(users));
 
-            // Create and save transaction log
             let nowStr = new Date().toLocaleString();
             let logDetails = actionType === 'add' ? `Admin Added: +${amount} Coins` : `Admin Deducted: -${amount} Coins`;
             
@@ -677,41 +805,29 @@
                 status: 'Completed (Admin Action)',
                 date: nowStr
             });
-            localStorage.setItem('mlm_transactions', JSON.stringify(transactions));
 
-            alert(`Successfully ${actionType === 'add' ? 'added' : 'deducted'} ${amount} coins! User wallet updated.`);
+            syncAdminToFirebase();
             loadAdminData();
         }
 
-        // 3. Delete User Account Feature
         function deleteUserAccount(mobile) {
-            let users = JSON.parse(localStorage.getItem('mlm_users')) || [];
             let userIndex = users.findIndex(u => u.mobile === mobile);
+            if (userIndex === -1) return;
 
-            if (userIndex === -1) {
-                alert('User not found.');
-                return;
-            }
-
-            let userName = users[userIndex].name;
-            let confirmDel = confirm(`Are you sure you want to permanently delete user account: ${userName} (${mobile})?`);
-            
-            if (confirmDel) {
+            if (confirm(`Are you sure you want to permanently delete user account (${mobile})?`)) {
                 users.splice(userIndex, 1);
-                localStorage.setItem('mlm_users', JSON.stringify(users));
-                alert('User account deleted successfully.');
+                syncAdminToFirebase();
                 loadAdminData();
             }
         }
 
         function resetUserPassword(mobile) {
-            let users = JSON.parse(localStorage.getItem('mlm_users')) || [];
             let newPass = prompt("Enter new password for user " + mobile + ":");
             if (newPass) {
                 let user = users.find(u => u.mobile === mobile);
                 if (user) {
                     user.password = newPass.trim();
-                    localStorage.setItem('mlm_users', JSON.stringify(users));
+                    syncAdminToFirebase();
                     alert('Password updated successfully!');
                     loadAdminData();
                 }
