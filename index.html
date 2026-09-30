@@ -527,12 +527,14 @@
                     let proofImg = tx.screenshot || tx.image || '';
                     let screenshotBtn = proofImg ? `<br><button class="action-btn" style="background:#2563eb; margin-top:4px;" onclick="viewScreenshot('${encodeURIComponent(proofImg)}')">📸 View Screenshot</button>` : `<br><small style="color:var(--text-light);">No screenshot attached</small>`;
 
+                    let txIndex = transactions.indexOf(tx);
+
                     tr.innerHTML = `
                         <td><strong>${userName}</strong><br><small>${tx.mobile}</small></td>
                         <td>${tx.details}<br><small style="color:var(--text-light);">${tx.date}</small>${screenshotBtn}</td>
                         <td>
-                            <button class="action-btn btn-success" onclick="approveDeposit('${tx.mobile}', '${tx.details}')">Approve</button>
-                            <button class="action-btn btn-danger" onclick="rejectTransaction('${tx.mobile}', '${tx.details}')">Reject</button>
+                            <button class="action-btn btn-success" onclick="approveDeposit('${tx.mobile}', '${escapeHtml(tx.details)}', ${txIndex})">Approve</button>
+                            <button class="action-btn btn-danger" onclick="rejectTransaction('${tx.mobile}', '${escapeHtml(tx.details)}')">Reject</button>
                         </td>
                     `;
                     depTableBody.appendChild(tr);
@@ -553,8 +555,8 @@
                         <td><strong>${userName}</strong><br><small>${tx.mobile}</small></td>
                         <td>${tx.details}<br><small style="color:var(--text-light);">${tx.date}</small></td>
                         <td>
-                            <button class="action-btn btn-success" onclick="approveWithdrawal('${tx.mobile}', '${tx.details}')">Mark Successful</button>
-                            <button class="action-btn btn-danger" onclick="rejectWithdrawal('${tx.mobile}', '${tx.details}')">Reject</button>
+                            <button class="action-btn btn-success" onclick="approveWithdrawal('${tx.mobile}', '${escapeHtml(tx.details)}')">Mark Successful</button>
+                            <button class="action-btn btn-danger" onclick="rejectWithdrawal('${tx.mobile}', '${escapeHtml(tx.details)}')">Reject</button>
                         </td>
                     `;
                     wdTableBody.appendChild(tr);
@@ -587,7 +589,7 @@
                         </td>
                         <td>
                             <small style="color:var(--text-light);">${tx.date}</small><br>
-                            <button class="action-btn btn-danger" style="margin-top:6px;" onclick="deleteHistoryLog('${tx.mobile}', '${tx.details}', '${tx.date}')">🗑️ Delete</button>
+                            <button class="action-btn btn-danger" style="margin-top:6px;" onclick="deleteHistoryLog('${tx.mobile}', '${escapeHtml(tx.details)}', '${tx.date}')">🗑️ Delete</button>
                         </td>
                     `;
                     historyTableBody.appendChild(tr);
@@ -645,6 +647,10 @@
             }
         }
 
+        function escapeHtml(str) {
+            return str.replace(/'/g, "\\'").replace(/"/g, '&quot;');
+        }
+
         function viewScreenshot(encodedImg) {
             let imgUrl = decodeURIComponent(encodedImg);
             document.getElementById('modal-title').innerText = "Payment Screenshot";
@@ -657,7 +663,6 @@
             let targetUser = users.find(u => u.mobile === mobile);
             if (!targetUser) return;
 
-            // Match by referral code or mobile number to ensure proper downline linkage
             let targetCodes = [targetUser.mobile, targetUser.referCode].filter(Boolean);
 
             let l1 = users.filter(u => targetCodes.includes(u.referredBy));
@@ -700,8 +705,18 @@
             document.getElementById('modal-body-content').innerHTML = `<img id="modal-img" src="" alt="Payment Proof">`;
         }
 
-        function approveDeposit(mobile, details) {
-            let match = details.match(/(\d+)\sCoins/);
+        // Updated approveDeposit function with double-click / multiple approval protection
+        function approveDeposit(mobile, details, txIndex) {
+            let tx = transactions[txIndex]; 
+            
+            // Strict check to prevent double click / processing same request twice
+            if (!tx || !tx.status || !tx.status.includes('Pending')) {
+                alert('Ye request pehle hi process ki ja chuki hai!');
+                loadAdminData();
+                return;
+            }
+
+            let match = tx.details.match(/(\d+)\sCoins/);
             if (!match) {
                 alert('Error parsing deposit amount.');
                 return;
@@ -713,13 +728,17 @@
                 user.wallet += amount;
             }
 
-            let tx = transactions.find(t => t.mobile === mobile && t.details === details && t.status.includes('Pending'));
-            if (tx) {
-                tx.status = 'Successful (Approved)';
-            }
+            // Immediately update status so subsequent clicks see it as non-pending
+            tx.status = 'Successful (Approved)';
 
+            // Save immediately to local storage and sync to Firebase
+            localStorage.setItem('mlm_users', JSON.stringify(users));
+            localStorage.setItem('mlm_transactions', JSON.stringify(transactions));
             syncAdminToFirebase();
+
             alert(`Successfully added ${amount} coins to user ${mobile}!`);
+            
+            // Refresh UI immediately to remove it from the pending list
             loadAdminData();
         }
 
